@@ -2,6 +2,9 @@ from __future__ import print_function
 import os.path
 import datetime
 import re
+import sys
+from pathlib import PurePath
+
 import bs4
 import Event
 from enum import Enum
@@ -14,12 +17,10 @@ import requests
 from requests import adapters
 import ssl
 from urllib3 import poolmanager
-from collections import namedtuple
 
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
 DEFAULT_TIME_OFFSET = datetime.timedelta(days=14)
-time_bounds = namedtuple("TimeBounds", "time_min time_max")
 
 
 class CalendarURLs(Enum):
@@ -48,7 +49,7 @@ class CalendarApp:
             now_plus_two_weeks = now + datetime.timedelta(days=14)
             now = now.isoformat() + 'Z'
             now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
-            self._delete_events(time_bounds(now, now_plus_two_weeks))
+            self._delete_events((now, now_plus_two_weeks))
             events_to_add = self._get_plan(CalendarURLs.TWO_WEEKS.value)
         elif calendar_range == CalendarRange.ALL:
             self._delete_events()
@@ -88,7 +89,7 @@ class CalendarApp:
 
     def _get_plan(self, plan_url):
         class TLSAdapter(adapters.HTTPAdapter):
-            def init_poolmanager(self, connections, maxsize, block=False):
+            def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
                 """Create and initialize the urllib3 PoolManager."""
                 ctx = ssl.create_default_context()
                 ctx.set_ciphers('DEFAULT@SECLEVEL=1')
@@ -99,15 +100,24 @@ class CalendarApp:
                     ssl_version=ssl.PROTOCOL_TLS,
                     ssl_context=ctx)
 
-        session = requests.session()
-        session.mount('https://', TLSAdapter())
-        try:
-            r = session.get(plan_url, proxies={"http": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080",
-                                               "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
-        except Exception as e:
-            print(f"Encountered exception: {e}\n"
-                  f"Trying to request resource without proxy...")
-            r = session.get(plan_url)
+        # session = requests.session()
+        # session.mount('https://', TLSAdapter())
+        # try:
+        #     r = session.get(plan_url, verify=False,
+        #                     proxies={"http": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080",
+        #                              "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
+        # except Exception as exception:
+        #     print(f"Encountered exception: {exception}\n"
+        #           f"Trying to request resource without proxy...")
+        #     r = session.get(plan_url, verify=False, cert='certs.pem')
+
+        import ssl
+        with open('certs.pem', 'r') as cert_file:
+            cert_content = cert_file.read()
+        cert = ssl.PEM_cert_to_DER_cert(cert_content)
+        print(cert)
+        r = requests.get(plan_url, cert=cert)
+
 
         soup = bs4.BeautifulSoup(r.content, 'html.parser')
         table = soup.find('table')
@@ -143,25 +153,37 @@ class CalendarApp:
         return events
 
     def _delete_events(self, bounds=()):
-        if bounds:
-            print(f'Getting events for deletion between {bounds.time_min} and {bounds.time_max}')
+        if len(bounds) == 2:
+            time_min, time_max = bounds
+            print(f'Getting events for deletion between {time_min} and {time_max}')
             events_result = self.service.events().list(calendarId=self.calendar_id,
-                                                       singleEvents=True, timeMin=bounds.time_min,
-                                                       timeMax=bounds.time_max, orderBy='startTime').execute()
+                                                       singleEvents=True, timeMin=time_min,
+                                                       timeMax=time_max, orderBy='startTime').execute()
         else:
             print('Getting events for deletion')
             events_result = self.service.events().list(calendarId=self.calendar_id,
                                                        singleEvents=True, orderBy='startTime').execute()
         events = events_result.get('items', [])
-        if not events:
-            print('No events found.')
-        for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            event_id = event['id']
-            print(f"Deleting: {start} {event['summary']}...")
-            self.service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+        if events:
+            print(f"Events found: {len(events)}")
+            for event in events:
+                start = event['start'].get('dateTime', event['start'].get('date'))
+                event_id = event['id']
+                print(f"Deleting: {start} {event['summary']}...")
+                self.service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+        else:
+            print("No events found.")
 
 
 if __name__ == '__main__':
-    app = CalendarApp()
-    app.update_calendar(CalendarRange.TWO_WEEKS)
+    print("Starting script")
+    print(f"Executable: {sys.executable}\n"
+          f"Working dir: {os.getcwd()}")
+    try:
+        app = CalendarApp()
+        app.update_calendar(CalendarRange.TWO_WEEKS)
+    except Exception as e:
+        print(e)
+        import os
+
+        os.system("PAUSE")
