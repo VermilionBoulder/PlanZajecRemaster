@@ -4,6 +4,7 @@ import datetime
 import re
 import bs4
 import Event
+from enum import Enum
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -13,12 +14,22 @@ import requests
 from requests import adapters
 import ssl
 from urllib3 import poolmanager
+from collections import namedtuple
 
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
-DEFAULT_URLS = {'two_weeks': "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1",
-                'semester': "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=2"}
 DEFAULT_TIME_OFFSET = datetime.timedelta(days=14)
+time_bounds = namedtuple("TimeBounds", "time_min time_max")
+
+
+class CalendarURLs(Enum):
+    TWO_WEEKS = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
+    SEMESTER = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=2"
+
+
+class CalendarRange(Enum):
+    ALL = "All"
+    TWO_WEEKS = "Two weeks"
 
 
 class CalendarApp:
@@ -30,14 +41,20 @@ class CalendarApp:
         self.creds = self._get_credentials()
         self.service = self._get_service()
 
-    def update_upcoming_two_weeks(self):
-        now = datetime.datetime.today()
-        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        now_plus_two_weeks = now + datetime.timedelta(days=14)
-        now = now.isoformat() + 'Z'
-        now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
-        self._delete_events(now, now_plus_two_weeks)
-        events_to_add = self._get_plan(DEFAULT_URLS['two_weeks'])
+    def update_calendar(self, calendar_range):
+        if calendar_range == CalendarRange.TWO_WEEKS:
+            now = datetime.datetime.today()
+            now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            now_plus_two_weeks = now + datetime.timedelta(days=14)
+            now = now.isoformat() + 'Z'
+            now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
+            self._delete_events(time_bounds(now, now_plus_two_weeks))
+            events_to_add = self._get_plan(CalendarURLs.TWO_WEEKS.value)
+        elif calendar_range == CalendarRange.ALL:
+            self._delete_events()
+            events_to_add = self._get_plan(CalendarURLs.SEMESTER.value)
+        else:
+            events_to_add = []
         self._insert_events(events_to_add)
 
     def _get_credentials(self):
@@ -86,7 +103,7 @@ class CalendarApp:
         session.mount('https://', TLSAdapter())
         try:
             r = session.get(plan_url, proxies={"http": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080",
-                                          "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
+                                               "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
         except Exception as e:
             print(f"Encountered exception: {e}\n"
                   f"Trying to request resource without proxy...")
@@ -100,35 +117,42 @@ class CalendarApp:
                    for row in table.find_all('tr')]
 
         events = []
-        for event in results[1:]:  # Skip first event
+        for event in [result for result in results if len(result) == 6]:  # Skip invalid events and transfers
             start, end = re.findall(r"\d\d:\d\d", event['Dzień, godzina'].text)
             start_formatted = datetime.datetime.strptime(f"{event['Termin'].text} {start}", "%Y-%m-%d %H:%M")
             end_formatted = datetime.datetime.strptime(f"{event['Termin'].text} {end}", "%Y-%m-%d %H:%M")
-            event_type = event['Typ'].text
+            event_type = event['Typ'].text.lower()
             if "ćwiczenia" in event_type:
                 event_type_short = "Ćw"
             elif "wykład" in event_type:
                 event_type_short = "Wk"
             elif "lektorat" in event_type:
                 event_type_short = "Lk"
+            elif "przeniesienie" in event_type:
+                event_type_short = "Przeniesione:"
             else:
                 event_type_short = ""
             summary = f"{event_type_short}{' ' if event_type_short else ''}{event['Przedmiot'].text}"
             link = ""
-            if isinstance(link_container := event['Sala'].contents[0], bs4.element.Tag):
-                link = link_container.attrs['href']
+            if event['Sala'].contents:
+                if isinstance(link_container := event['Sala'].contents[0], bs4.element.Tag):
+                    link = link_container.attrs['href']
             description = f"Prowadzący: {event['Nauczyciel'].text}\n" \
                           f"{event['Sala'].text.title()}{': ' + link if link else ''}"
             events.append(Event.Event(start_formatted, end_formatted, summary, description).get_calendar_event())
         return events
 
-    def _delete_events(self, time_min, time_max):
-        print(f'Getting events for deletion between {time_min} and {time_max}')
-        events_result = self.service.events().list(calendarId=self.calendar_id,
-                                                   singleEvents=True, timeMin=time_min,
-                                                   timeMax=time_max, orderBy='startTime').execute()
+    def _delete_events(self, bounds=()):
+        if bounds:
+            print(f'Getting events for deletion between {bounds.time_min} and {bounds.time_max}')
+            events_result = self.service.events().list(calendarId=self.calendar_id,
+                                                       singleEvents=True, timeMin=bounds.time_min,
+                                                       timeMax=bounds.time_max, orderBy='startTime').execute()
+        else:
+            print('Getting events for deletion')
+            events_result = self.service.events().list(calendarId=self.calendar_id,
+                                                       singleEvents=True, orderBy='startTime').execute()
         events = events_result.get('items', [])
-
         if not events:
             print('No events found.')
         for event in events:
@@ -140,4 +164,4 @@ class CalendarApp:
 
 if __name__ == '__main__':
     app = CalendarApp()
-    app.update_upcoming_two_weeks()
+    app.update_calendar(CalendarRange.TWO_WEEKS)
