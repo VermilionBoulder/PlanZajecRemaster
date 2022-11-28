@@ -4,8 +4,12 @@ import datetime
 import re
 import sys
 from pathlib import PurePath
+import urllib.request
 
 import bs4
+import pem
+import urllib3
+
 import Event
 from enum import Enum
 from google.auth.transport.requests import Request
@@ -88,36 +92,25 @@ class CalendarApp:
             print(f"Event created: {event.get('summary')}")
 
     def _get_plan(self, plan_url):
-        class TLSAdapter(adapters.HTTPAdapter):
-            def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
-                """Create and initialize the urllib3 PoolManager."""
+        class TLSAdapter(requests.adapters.HTTPAdapter):
+            def init_poolmanager(self, *args, **kwargs):
                 ctx = ssl.create_default_context()
+                ctx.check_hostname = False
                 ctx.set_ciphers('DEFAULT@SECLEVEL=1')
-                self.poolmanager = poolmanager.PoolManager(
-                    num_pools=connections,
-                    maxsize=maxsize,
-                    block=block,
-                    ssl_version=ssl.PROTOCOL_TLS,
-                    ssl_context=ctx)
+                kwargs['ssl_context'] = ctx
+                return super(TLSAdapter, self).init_poolmanager(*args, **kwargs)
 
-        # session = requests.session()
-        # session.mount('https://', TLSAdapter())
-        # try:
-        #     r = session.get(plan_url, verify=False,
-        #                     proxies={"http": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080",
-        #                              "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
-        # except Exception as exception:
-        #     print(f"Encountered exception: {exception}\n"
-        #           f"Trying to request resource without proxy...")
-        #     r = session.get(plan_url, verify=False, cert='certs.pem')
+        session = requests.session()
+        session.mount('https://', TLSAdapter())
 
-        import ssl
-        with open('certs.pem', 'r') as cert_file:
-            cert_content = cert_file.read()
-        cert = ssl.PEM_cert_to_DER_cert(cert_content)
-        print(cert)
-        r = requests.get(plan_url, cert=cert)
-
+        try:
+            r = session.get(plan_url, verify=False,
+                            proxies={"http": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080",
+                                     "https": "http://lab-proxy.krk-lab.nsn-rdnet.net:8080"})
+        except Exception as exception:
+            print(f"Encountered exception: {exception}\n"
+                  f"Trying to request resource without proxy...")
+            r = session.get(plan_url, verify=False)
 
         soup = bs4.BeautifulSoup(r.content, 'html.parser')
         table = soup.find('table')
@@ -179,11 +172,5 @@ if __name__ == '__main__':
     print("Starting script")
     print(f"Executable: {sys.executable}\n"
           f"Working dir: {os.getcwd()}")
-    try:
-        app = CalendarApp()
-        app.update_calendar(CalendarRange.TWO_WEEKS)
-    except Exception as e:
-        print(e)
-        import os
-
-        os.system("PAUSE")
+    app = CalendarApp()
+    app.update_calendar(CalendarRange.TWO_WEEKS)
