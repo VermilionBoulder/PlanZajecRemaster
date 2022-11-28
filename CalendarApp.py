@@ -3,13 +3,7 @@ import os.path
 import datetime
 import re
 import sys
-from pathlib import PurePath
-import urllib.request
-
 import bs4
-import pem
-import urllib3
-
 import Event
 from enum import Enum
 from google.auth.transport.requests import Request
@@ -20,7 +14,6 @@ from googleapiclient.errors import HttpError
 import requests
 from requests import adapters
 import ssl
-from urllib3 import poolmanager
 
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
@@ -46,19 +39,23 @@ class CalendarApp:
         self.creds = self._get_credentials()
         self.service = self._get_service()
 
-    def update_calendar(self, calendar_range):
-        if calendar_range == CalendarRange.TWO_WEEKS:
-            now = datetime.datetime.today()
-            now = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            now_plus_two_weeks = now + datetime.timedelta(days=14)
-            now = now.isoformat() + 'Z'
-            now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
-            self._delete_events((now, now_plus_two_weeks))
-            events_to_add = self._get_plan(CalendarURLs.TWO_WEEKS.value)
-        elif calendar_range == CalendarRange.ALL:
-            self._delete_events()
-            events_to_add = self._get_plan(CalendarURLs.SEMESTER.value)
+    def update_calendar(self, args):
+        if isinstance(args, list) and len(args) >= 2:
+            match args[1]:
+                case "two_weeks" | "Two_weeks":
+                    now = datetime.datetime.today()
+                    now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    now_plus_two_weeks = now + datetime.timedelta(days=14)
+                    now = now.isoformat() + 'Z'
+                    now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
+                    self._delete_events((now, now_plus_two_weeks))
+                    events_to_add = self._get_plan(CalendarURLs.TWO_WEEKS.value)
+                case _:
+                    self._delete_events()
+                    events_to_add = self._get_plan(CalendarURLs.SEMESTER.value)
         else:
+            print(f"Bad argument(s): {args[1:]}\n"
+                  f"Updating entire calendar")
             events_to_add = []
         self._insert_events(events_to_add)
 
@@ -173,4 +170,4 @@ if __name__ == '__main__':
     print(f"Executable: {sys.executable}\n"
           f"Working dir: {os.getcwd()}")
     app = CalendarApp()
-    app.update_calendar(CalendarRange.TWO_WEEKS)
+    app.update_calendar(sys.argv)
