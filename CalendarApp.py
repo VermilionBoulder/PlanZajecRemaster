@@ -118,10 +118,10 @@ class CalendarApp:
 
         events = []
         for event in [result for result in results if len(result) == 6]:  # Skip invalid events and transfers
-            start, end = re.findall(r"\d\d:\d\d", event['Dzień, godzina'].text)
-            start_formatted = datetime.datetime.strptime(f"{event['Termin'].text} {start}", "%Y-%m-%d %H:%M")
-            end_formatted = datetime.datetime.strptime(f"{event['Termin'].text} {end}", "%Y-%m-%d %H:%M")
-            event_type = event['Typ'].text.lower()
+            start, end = re.findall(r"\d\d:\d\d", event.get('Dzień, godzina').text)
+            start_formatted = datetime.datetime.strptime(f"{event.get('Termin').text} {start}", "%Y-%m-%d %H:%M")
+            end_formatted = datetime.datetime.strptime(f"{event.get('Termin').text} {end}", "%Y-%m-%d %H:%M")
+            event_type = event.get('Typ').text.lower()
             if "ćwiczenia" in event_type:
                 event_type_short = "Ćw"
             elif "wykład" in event_type:
@@ -132,13 +132,13 @@ class CalendarApp:
                 event_type_short = "Przeniesione:"
             else:
                 event_type_short = ""
-            summary = f"{event_type_short}{' ' if event_type_short else ''}{event['Przedmiot'].text}"
+            summary = f"{event_type_short}{' ' if event_type_short else ''}{event.get('Przedmiot').text}"
             link = ""
-            if event['Sala'].contents:
-                if isinstance(link_container := event['Sala'].contents[0], bs4.element.Tag):
+            if event.get('Sala').contents:
+                if isinstance(link_container := event.get('Sala').contents[0], bs4.element.Tag):
                     link = link_container.attrs['href']
-            description = f"Prowadzący: {event['Nauczyciel'].text}\n" \
-                          f"{event['Sala'].text.title()}{': ' + link if link else ''}"
+            description = f"Prowadzący: {event.get('Nauczyciel').text}\n" \
+                          f"{event.get('Sala').text.title()}{': ' + link if link else ''}"
             events.append(Event.Event(start_formatted, end_formatted, summary, description).get_calendar_event())
         return events
 
@@ -157,9 +157,9 @@ class CalendarApp:
         if events:
             print(f"Events found: {len(events)}")
             for event in events:
-                start = event['start'].get('dateTime', event['start'].get('date'))
-                event_id = event['id']
-                print(f"Deleting: {start} {event['summary']}...")
+                start = event.get('start').get('dateTime', event.get('start').get('date'))
+                event_id = event.get('id')
+                print(f"Deleting: {start} {event.get('summary')}...")
                 self.service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
         else:
             print("No events found.")
