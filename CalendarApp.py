@@ -1,33 +1,30 @@
 from __future__ import print_function
-import os.path
+
 import datetime
+import os.path
 import re
+import ssl
 import sys
+
 import bs4
-import Event
-from enum import Enum
+import requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import requests
 from requests import adapters
-import ssl
+
+import Event
 
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
 DEFAULT_TIME_OFFSET = datetime.timedelta(days=14)
+PLAN_URL = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
 
-
-class CalendarURLs(Enum):
-    TWO_WEEKS = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
-    SEMESTER = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=2"
-
-
-class CalendarRange(Enum):
-    ALL = "All"
-    TWO_WEEKS = "Two weeks"
+url_without_set_time_period = '&'.join(PLAN_URL.split('&')[:-1])
+TWO_WEEKS_URL = f"{url_without_set_time_period}&okres=1"
+SEMESTER_URL = f"{url_without_set_time_period}&okres=2"
 
 
 class CalendarApp:
@@ -49,10 +46,10 @@ class CalendarApp:
                     now = now.isoformat() + 'Z'
                     now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
                     self._delete_events((now, now_plus_two_weeks))
-                    events_to_add = self._get_plan(CalendarURLs.TWO_WEEKS.value)
+                    events_to_add = self._get_plan(TWO_WEEKS_URL)
                 case _:
                     self._delete_events()
-                    events_to_add = self._get_plan(CalendarURLs.SEMESTER.value)
+                    events_to_add = self._get_plan(SEMESTER_URL)
         else:
             print(f"Bad argument(s): {args[1:]}\n"
                   f"Updating entire calendar")
