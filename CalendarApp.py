@@ -17,10 +17,11 @@ from requests import adapters
 
 import Event
 
+PLAN_URL = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
+
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
 DEFAULT_TIME_OFFSET = datetime.timedelta(days=14)
-PLAN_URL = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
 
 url_without_set_time_period = '&'.join(PLAN_URL.split('&')[:-1])
 TWO_WEEKS_URL = f"{url_without_set_time_period}&okres=1"
@@ -46,15 +47,15 @@ class CalendarApp:
                     now = now.isoformat() + 'Z'
                     now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
                     self._delete_events((now, now_plus_two_weeks))
-                    events_to_add = self._get_plan(TWO_WEEKS_URL)
+                    events_to_update = self._get_plan_from_website(TWO_WEEKS_URL)
                 case _:
                     self._delete_events()
-                    events_to_add = self._get_plan(SEMESTER_URL)
+                    events_to_update = self._get_plan_from_website(SEMESTER_URL)
         else:
             print(f"Bad argument(s): {args[1:]}\n"
                   f"Updating entire calendar")
-            events_to_add = []
-        self._insert_events(events_to_add)
+            events_to_update = []
+        self._insert_events(events_to_update)
 
     def _get_credentials(self):
         creds = None
@@ -85,7 +86,12 @@ class CalendarApp:
             self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
             print(f"Event created: {event.get('summary')}")
 
-    def _get_plan(self, plan_url):
+    def _get_plan_from_website(self, plan_url):
+        """
+        Gets events from planzajec.uek.krakow.pl
+        :param plan_url: Url of plan to get events from
+        :return: List of events
+        """
         class TLSAdapter(requests.adapters.HTTPAdapter):
             def init_poolmanager(self, *args, **kwargs):
                 ctx = ssl.create_default_context()
