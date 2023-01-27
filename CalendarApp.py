@@ -5,6 +5,7 @@ import os.path
 import re
 import ssl
 import sys
+from itertools import zip_longest
 
 import bs4
 import requests
@@ -35,27 +36,53 @@ class CalendarApp:
         self.time_offset = time_offset
 
         self.creds = self._get_credentials()
-        self.service = self._get_service()
+        self.service = self._get_service()  # TODO fix this
 
-    def update_calendar(self, args):
+    def main(self, args):
         if isinstance(args, list) and len(args) >= 2:
             match args[1]:
                 case "two_weeks" | "Two_weeks":
-                    now = datetime.datetime.today()
-                    now = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                    now_plus_two_weeks = now + datetime.timedelta(days=14)
-                    now = now.isoformat() + 'Z'
-                    now_plus_two_weeks = now_plus_two_weeks.isoformat() + 'Z'
-                    self._delete_events((now, now_plus_two_weeks))
-                    events_to_update = self._get_plan_from_website(TWO_WEEKS_URL)
+                    self.update_calendar(TWO_WEEKS_URL)
                 case _:
-                    self._delete_events()
-                    events_to_update = self._get_plan_from_website(SEMESTER_URL)
+                    self.update_calendar(SEMESTER_URL)
         else:
             print(f"Bad argument(s): {args[1:]}\n"
                   f"Updating entire calendar")
-            events_to_update = []
-        self._insert_events(events_to_update)
+            self.update_calendar(SEMESTER_URL)
+
+    def update_calendar(self, plan_url):
+        events_in_website_plan = self._get_events_from_website_plan(plan_url)
+        if plan_url == TWO_WEEKS_URL:
+            events_in_google_calendar = self._get_events_from_google_calendar(time_bounds=self._get_time_bounds())
+        elif plan_url == SEMESTER_URL:
+            events_in_google_calendar = self._get_events_from_google_calendar()
+        else:
+            raise ValueError("Bad URL provided - neither TWO_WEEKS_URL nor SEMESTER!")
+
+        for event in zip_longest(events_in_website_plan,
+                                 events_in_google_calendar,
+                                 fillvalue=None):
+            # TODO:
+            #  If event in calendar but not on website: delete
+            #  If event in calendar and on website: skip
+            #  If event not in calendar but on website: add
+            #  Compare events based on summary and time
+            print(event[0].get('summary'), event[1].get('summary'))
+
+    def _get_events_from_google_calendar(self, time_bounds=()):
+        if len(time_bounds) == 2:
+            time_min, time_max = time_bounds
+            print(f'Getting events for deletion between {time_min} and {time_max}')
+            events_result = self.service.events().list(calendarId=self.calendar_id,
+                                                       singleEvents=True, timeMin=time_min,
+                                                       timeMax=time_max, orderBy='startTime').execute()
+        else:
+            print('Getting events for deletion')
+            events_result = self.service.events().list(calendarId=self.calendar_id,
+                                                       singleEvents=True, orderBy='startTime').execute()
+        events = events_result.get('items', [])
+        print(f"Events in Google Calendar: {len(events)}")
+        return events
 
     def _get_credentials(self):
         creds = None
@@ -86,7 +113,7 @@ class CalendarApp:
             self.service.events().insert(calendarId=self.calendar_id, body=event).execute()
             print(f"Event created: {event.get('summary')}")
 
-    def _get_plan_from_website(self, plan_url):
+    def _get_events_from_website_plan(self, plan_url):
         """
         Gets events from planzajec.uek.krakow.pl
         :param plan_url: Url of plan to get events from
@@ -167,10 +194,22 @@ class CalendarApp:
         else:
             print("No events found.")
 
+    def _get_time_bounds(self):
+        """
+        Defines datetime objects for now and now + DEFAULT_TIME_OFFSET
+        :return: now, now_plus_time_offset
+        """
+        now = datetime.datetime.today()
+        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        now_plus_time_offset = now + DEFAULT_TIME_OFFSET
+        now = now.isoformat() + 'Z'
+        now_plus_time_offset = now_plus_time_offset.isoformat() + 'Z'
+        return now, now_plus_time_offset
+
 
 if __name__ == '__main__':
     print("Starting script")
     print(f"Executable: {sys.executable}\n"
           f"Working dir: {os.getcwd()}")
     app = CalendarApp()
-    app.update_calendar(sys.argv)
+    app.main(sys.argv)
