@@ -18,7 +18,7 @@ from requests import adapters
 
 import Event
 
-PLAN_URL = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186581&okres=1"
+PLAN_URL = "https://planzajec.uek.krakow.pl/index.php?typ=G&id=186601&okres=1"
 
 DEFAULT_SCOPES = ['https://www.googleapis.com/auth/calendar']
 DEFAULT_CALENDAR_ID = 'b5d70ec1afdce64dc795396461dafe97bb82e3ab3f0f6933e3404830d9660714@group.calendar.google.com'
@@ -36,7 +36,7 @@ class CalendarApp:
         self.time_offset = time_offset
 
         self.creds = self._get_credentials()
-        self.service = self._get_service()  # TODO fix this
+        self.service = self._get_service()
 
     def main(self, args):
         if isinstance(args, list) and len(args) >= 2:
@@ -59,15 +59,29 @@ class CalendarApp:
         else:
             raise ValueError("Bad URL provided - neither TWO_WEEKS_URL nor SEMESTER!")
 
-        for event in zip_longest(events_in_website_plan,
-                                 events_in_google_calendar,
-                                 fillvalue=None):
-            # TODO:
-            #  If event in calendar but not on website: delete
-            #  If event in calendar and on website: skip
-            #  If event not in calendar but on website: add
-            #  Compare events based on summary and time
-            print(event[0].get('summary'), event[1].get('summary'))
+        simplified_website_plan = []
+        for event in events_in_website_plan:
+            print(event)
+            simplified_website_plan.append(
+                Event.Event(
+                    start=event.get('start').get('datetime'),
+                    end=event.get('end').get('datetime'),
+                    summary=event.get('summary'),
+                    description=event.get('description'),
+                    timezone=event.get('timezone')
+                ).get_calendar_event()
+            )
+        print(simplified_website_plan)
+
+        # for website_event, calendar_event in zip_longest(events_in_website_plan,
+        #                                                  events_in_google_calendar,
+        #                                                  fillvalue=dict()):
+        #     # TODO:
+        #     #  If event in calendar but not on website: delete
+        #     #  If event in calendar and on website: skip
+        #     #  If event not in calendar but on website: add
+        #     #  Compare events based on summary and time
+        #     print(website_event.get('summary'), calendar_event.get('summary'))
 
     def _get_events_from_google_calendar(self, time_bounds=()):
         if len(time_bounds) == 2:
@@ -119,6 +133,7 @@ class CalendarApp:
         :param plan_url: Url of plan to get events from
         :return: List of events
         """
+
         class TLSAdapter(requests.adapters.HTTPAdapter):
             def init_poolmanager(self, *args, **kwargs):
                 ctx = ssl.create_default_context()
@@ -194,7 +209,8 @@ class CalendarApp:
         else:
             print("No events found.")
 
-    def _get_time_bounds(self):
+    @staticmethod
+    def _get_time_bounds():
         """
         Defines datetime objects for now and now + DEFAULT_TIME_OFFSET
         :return: now, now_plus_time_offset
